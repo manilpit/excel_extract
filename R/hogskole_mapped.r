@@ -54,8 +54,15 @@ excel_overføring <- function(
   eiendeler_data <- read.xlsx(kilde_fil, sheet = eiendeler_ark)
   gjeld_ek_data <- read.xlsx(kilde_fil, sheet = gjeld_ek_ark)
   
-  # Hjelpefunksjon for å finne verdi i en dataramme
+  # Hjelpefunksjon for å finne verdi i en dataramme (hopper over lønnskostnader)
   finn_verdi <- function(data, nøkkelord) {
+    # Hopp over lønnskostnader - de håndteres separat
+    if (nøkkelord == "Lønnskostnader") {
+      cat(" * Hopper over lønnskostnader i standard søk\n")
+      return(NA)
+    }
+    
+    # Standard søkemetode for andre nøkkelord
     for (rad in 1:nrow(data)) {
       for (kol in 1:ncol(data)) {
         if (!is.na(data[rad, kol]) && is.character(data[rad, kol])) {
@@ -84,6 +91,42 @@ excel_overføring <- function(
       }
     }
     cat(paste(" * Fant ikke verdi for", nøkkelord, "\n"))
+    return(NA)
+  }
+  
+  # Spesialfunksjon for å finne lønnskostnader direkte fra kolonne 3
+  finn_lonnskostnader <- function(data) {
+    for (rad in 1:nrow(data)) {
+      for (kol in 1:ncol(data)) {
+        if (!is.na(data[rad, kol]) && is.character(data[rad, kol])) {
+          if (grepl("lønnskostnad", tolower(data[rad, kol]), fixed = TRUE)) {
+            cat(paste("Fant lønnskostnader i rad", rad, "kolonne", kol, "\n"))
+            
+            # Direkte hent fra kolonne 3 som vi vet har lønnskostnader
+            if (3 <= ncol(data)) {
+              lonnsverdi <- data[rad, 3]  # Direkte fra kolonne 3
+              
+              # Sjekk om dette er et tall
+              if (is.numeric(lonnsverdi) || (!is.na(lonnsverdi) && is.character(lonnsverdi) && 
+                  grepl("^\\s*-?[0-9.,]+\\s*$", lonnsverdi))) {
+                
+                # Konverter til tall
+                if (is.character(lonnsverdi)) {
+                  lonnsverdi <- as.numeric(gsub("[^0-9\\.-]", "", gsub(",", ".", lonnsverdi)))
+                }
+                
+                cat(paste(" * Fant Lønnskostnader =", lonnsverdi, "(fra kolonne 3)\n"))
+                return(lonnsverdi)
+              } else {
+                cat(paste(" * Verdi i kolonne 3 ikke numerisk:", lonnsverdi, "\n"))
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    cat(" * Kunne ikke finne lønnskostnader i kolonne 3\n")
     return(NA)
   }
   
@@ -270,9 +313,9 @@ excel_overføring <- function(
   # 3. Finn verdier fra kildefil
   cat("Henter verdier fra kildefil...\n")
   
-  # For resultatregnskapet
+  # For resultatregnskapet - vi hopper over lønnskostnader for nå
   driftsinntekter <- finn_verdi(resultat_data, "Sum driftsinntekter")
-  lonnskostnader <- finn_verdi(resultat_data, "Lønnskostnader")
+  # Lønnskostnader håndteres separat
   driftskostnader <- finn_verdi(resultat_data, "Sum driftskostnader")
   driftsresultat <- finn_verdi(resultat_data, "Driftsresultat")
   arsresultat <- finn_verdi(resultat_data, "Årsresultat")
@@ -295,28 +338,37 @@ excel_overføring <- function(
   
   # Sjekk om målfil eksisterer, ellers opprett ny
   if (file.exists(output_fil)) {
-    wb <- loadWorkbook(output_fil)
-    
-    # List opp alle ark i målfilen for å verifisere navn
-    målark <- names(wb)
-    cat("Ark i målfilen:\n")
-    for (i in seq_along(målark)) {
-      cat(paste(" ", i, ":", målark[i], "\n"))
-    }
-    
-    # Sjekk om arkene finnes
-    if (!(resultat_målark %in% målark)) {
-      stop(paste("FEIL: Arket", resultat_målark, "finnes ikke i målfilen!"), call.=FALSE)
-    }
-    
-    if (!(eiendeler_målark %in% målark)) {
-      lignende_ark <- grep("balanse", målark, ignore.case = TRUE, value = TRUE)
-      if (length(lignende_ark) > 0) {
-        cat(paste("Fant lignende balanseark:", paste(lignende_ark, collapse = ", "), "\n"))
-        cat("Bruk eiendeler_målark parameter for å spesifisere riktig arknavn.\n")
+    # Prøv å laste inn eksisterende fil med feilhåndtering
+    tryCatch({
+      wb <- loadWorkbook(output_fil)
+      
+      # List opp alle ark i målfilen for å verifisere navn
+      målark <- names(wb)
+      cat("Ark i målfilen:\n")
+      for (i in seq_along(målark)) {
+        cat(paste(" ", i, ":", målark[i], "\n"))
       }
-      stop(paste("FEIL: Arket", eiendeler_målark, "finnes ikke i målfilen!"), call.=FALSE)
-    }
+      
+      # Sjekk om arkene finnes
+      if (!(resultat_målark %in% målark)) {
+        stop(paste("FEIL: Arket", resultat_målark, "finnes ikke i målfilen!"), call.=FALSE)
+      }
+      
+      if (!(eiendeler_målark %in% målark)) {
+        lignende_ark <- grep("balanse", målark, ignore.case = TRUE, value = TRUE)
+        if (length(lignende_ark) > 0) {
+          cat(paste("Fant lignende balanseark:", paste(lignende_ark, collapse = ", "), "\n"))
+          cat("Bruk eiendeler_målark parameter for å spesifisere riktig arknavn.\n")
+        }
+        stop(paste("FEIL: Arket", eiendeler_målark, "finnes ikke i målfilen!"), call.=FALSE)
+      }
+    }, error = function(e) {
+      cat(paste("FEIL ved lesing av målfil:", e$message, "\n"))
+      cat("Oppretter ny målfil...\n")
+      wb <- createWorkbook()
+      addWorksheet(wb, resultat_målark)
+      addWorksheet(wb, eiendeler_målark)
+    })
   } else {
     # Opprett ny arbeidsbok
     wb <- createWorkbook()
@@ -325,11 +377,11 @@ excel_overføring <- function(
     cat("Opprettet ny målfil med ark:", resultat_målark, "og", eiendeler_målark, "\n")
   }
   
-  # 5. Skriv resultatverdier til målfilen
-  cat("\n-- SKRIVER VERDIER TIL MÅLFIL --\n")
+  # 5. Skriv resultatverdier til målfilen (uten lønnskostnader)
+  cat("\n-- SKRIVER VERDIER TIL MÅLFIL (UNNTATT LØNNSKOSTNADER) --\n")
   cat(paste("Skriver til", resultat_målark, "på rad", resultat_rad, "...\n"))
   
-  resultat_verdier <- c(driftsinntekter, lonnskostnader, driftskostnader, driftsresultat, arsresultat)
+  resultat_verdier <- c(driftsinntekter, NA, driftskostnader, driftsresultat, arsresultat)
   resultat_nøkkelord <- c("Sum driftsinntekter", "Lønnskostnader", "Sum driftskostnader", 
                         "Driftsresultat", "Årsresultat")
   verdier_skrevet <- 0
@@ -392,6 +444,23 @@ excel_overføring <- function(
     }
   }
   
+  # TRINN 2: SEPARAT BEHANDLING AV LØNNSKOSTNADER
+  cat("\n== SEPARAT BEHANDLING AV LØNNSKOSTNADER ==\n")
+  
+  # Finn lønnskostnader direkte fra kolonne 3
+  lonnskostnader <- finn_lonnskostnader(resultat_data)
+  
+  if (!is.na(lonnskostnader)) {
+    # Skriv lønnskostnader til målfilen
+    writeData(wb, sheet = resultat_målark, x = lonnskostnader, 
+             startRow = resultat_rad, startCol = resultat_kolonner[2])  # Kolonne 2 er for lønnskostnader
+    cat(paste(" * Skrev Lønnskostnader =", lonnskostnader, "til", 
+             resultat_målark, "rad", resultat_rad, "kolonne", resultat_kolonner[2], "\n"))
+    verdier_skrevet <- verdier_skrevet + 1
+  } else {
+    cat(" * ADVARSEL: Kunne ikke finne lønnskostnader!\n")
+  }
+  
   # 7. Lagre målfilen
   tryCatch({
     saveWorkbook(wb, output_fil, overwrite = TRUE)
@@ -411,10 +480,10 @@ excel_overføring <- function(
   return(invisible(verdier_skrevet))
 }
 
-# Eksempel på bruk (kan fjernes/kommenteres ut)
+# # Eksempel på bruk (kan fjernes/kommenteres ut)
 # excel_overføring(
-#   kilde_fil = "8208_2024_VID.xlsx", 
-#   output_fil = "orginal_3.xlsx", 
+#   kilde_fil = "8202_2024_høyskolen_197978.xlsx", 
+#   output_fil = "bruksanvisning_1.xlsx", 
 #   resultat_rad = 12, 
 #   balanse_rad = 12,
 #   resultat_målark = "Tab resultat",
