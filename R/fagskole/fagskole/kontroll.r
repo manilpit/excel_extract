@@ -6,11 +6,11 @@ library(activeDir)
 set_wd_to_current()
 
 # Last inn hovedfunksjoner
-source("v4_load_not_createworkbook.r")
+source("v6.r")
 
 # Sett stier
 kilde_mappe <- "//wsl.localhost/Ubuntu-24.04/home/manilpit/github/manilpit_github/excel_extract/data/fagskole"  # Endre til din mappe med kildefiler
-output_fil <- "//wsl.localhost/Ubuntu-24.04/home/manilpit/github/manilpit_github/excel_extract/R/fagskole/mal/Kontroll_private_fagskoler_2025_demo.xlsx"  # Endre til din målfil
+output_fil <- "//wsl.localhost/Ubuntu-24.04/home/manilpit/github/manilpit_github/excel_extract/resultat/Kontroll_private_fagskoler_2025.xlsx"  # Endre til din målfil
 
 # Funksjon for å kjøre på alle filer
 kjor_for_alle_filer <- function(kilde_mappe, output_fil) {
